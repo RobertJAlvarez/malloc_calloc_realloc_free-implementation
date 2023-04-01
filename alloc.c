@@ -12,18 +12,18 @@ void print_LL_info(void);
 
 typedef struct s_Block {
   size_t bytes_used;
-  struct s_Block *next_block;
+  Block *next_block;
 } Block;
 
 typedef struct s_Map {
-  struct s_Block *first_block;
-  struct s_Block *largest_block;
-  struct s_Map *next_map;
+  Block *first_block;
+  Block *largest_block;
+  Map *next_map;
 } Map;
 
 typedef struct s_List {
-  struct s_Map *first_map;
-  struct s_Map *largest_map;
+  Map *first_map;
+  Map *largest_map;
 } List;
 
 // END OF STRUCTs
