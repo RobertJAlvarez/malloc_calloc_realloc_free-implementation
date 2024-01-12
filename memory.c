@@ -13,18 +13,18 @@
 
     Compile this file like that:
 
-    gcc -fPIC -Wall -g -O0 -c memory.c 
+    gcc -fPIC -Wall -g -O0 -c memory.c
     gcc -fPIC -Wall -g -O0 -c implementation.c
     gcc -fPIC -shared -o memory.so memory.o implementation.o -lpthread
 
     To try the code out:
 
     export LD_LIBRARY_PATH=`pwd`:"$LD_LIBRARY_PATH"
-    export LD_PRELOAD=`pwd`/memory.so 
+    export LD_PRELOAD=`pwd`/memory.so
     export MEMORY_DEBUG=yes
     ls
 
-    (If you are building elsewhere than you are testing, adapt 
+    (If you are building elsewhere than you are testing, adapt
      the `pwd` statement to your environment.)
 
     You will see a debug message on stderr per
@@ -39,7 +39,7 @@
     understand it. Your actual implementation goes into the file
     implementation.c, which also has some predefined parts.
 
-    Be careful while debugging your code: 
+    Be careful while debugging your code:
 
     * Run your tests in another terminal as the one you use for
       compilation or don't export the environment variables. When a
@@ -49,7 +49,7 @@
       the compiler runs with that implementation.
 
     * If you want to use gdb to debug your code, you can get inspiration
-      on how to setup gdb in such a way that gdb does not use the (buggy?) 
+      on how to setup gdb in such a way that gdb does not use the (buggy?)
       malloc/calloc/realloc/free but the application does on the following
       site:
 
@@ -71,17 +71,18 @@
 
     * Don't get frustrated too early. It can be done - your instructor
       implemented the whole thing and got it to the point where it
-      runs libreoffice. However: start working on this assignment really 
+      runs libreoffice. However: start working on this assignment really
       early: it takes some time to debug it. It took the instructor about 6h
       to implement his version.
 */
 
+#include <pthread.h>
+#include <stdarg.h>
 #include <stddef.h>
 #include <stdio.h>
-#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
-#include <pthread.h>
+
 #include "alloc.h"
 
 static int __memory_print_debug_running = 0;
@@ -92,8 +93,7 @@ static int __memory_print_debug_do_it = 0;
 static pthread_mutex_t memory_management_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t print_lock = PTHREAD_MUTEX_INITIALIZER;
 
-static void __memory_print_debug_init()
-{
+static void __memory_print_debug_init() {
   char *env_var;
 
   if (__memory_print_debug_init_running) return;
@@ -103,7 +103,7 @@ static void __memory_print_debug_init()
     env_var = getenv("MEMORY_DEBUG");
     if (env_var != NULL) {
       if (!strcmp(env_var, "yes")) {
-	__memory_print_debug_do_it = 1;
+        __memory_print_debug_do_it = 1;
       }
     }
     __memory_print_debug_initialized = 1;
@@ -111,8 +111,7 @@ static void __memory_print_debug_init()
   __memory_print_debug_init_running = 0;
 }
 
-static void __memory_print_debug(const char *fmt, ...)
-{
+static void __memory_print_debug(const char *fmt, ...) {
   va_list valist;
 
   if (pthread_mutex_trylock(&print_lock) != 0) return;
@@ -131,8 +130,7 @@ static void __memory_print_debug(const char *fmt, ...)
   pthread_mutex_unlock(&print_lock);
 }
 
-void *malloc(size_t size)
-{
+void *malloc(size_t size) {
   //__memory_print_debug("calling malloc with 0x%zx size\n", size);
   void *ptr;
 
@@ -143,9 +141,9 @@ void *malloc(size_t size)
   return ptr;
 }
 
-void *calloc(size_t nmemb, size_t size)
-{
-  //__memory_print_debug("calling calloc with 0x%zx items of size 0x%zx\n", nmemb, size);
+void *calloc(size_t nmemb, size_t size) {
+  //__memory_print_debug("calling calloc with 0x%zx items of size 0x%zx\n",
+  //nmemb, size);
   void *ptr;
 
   pthread_mutex_lock(&memory_management_lock);
@@ -155,9 +153,9 @@ void *calloc(size_t nmemb, size_t size)
   return ptr;
 }
 
-void *realloc(void *old_ptr, size_t size)
-{
-  //__memory_print_debug("calling realloc with pointer %p and new size 0x%zx\n", old_ptr, size);
+void *realloc(void *old_ptr, size_t size) {
+  //__memory_print_debug("calling realloc with pointer %p and new size 0x%zx\n",
+  //old_ptr, size);
   void *ptr;
 
   pthread_mutex_lock(&memory_management_lock);
@@ -167,12 +165,10 @@ void *realloc(void *old_ptr, size_t size)
   return ptr;
 }
 
-void free(void *ptr)
-{
+void free(void *ptr) {
   //__memory_print_debug("calling free with pointer %p\n", ptr);
   pthread_mutex_lock(&memory_management_lock);
   __free_impl(ptr);
   pthread_mutex_unlock(&memory_management_lock);
   __memory_print_debug("free(%p)\n", ptr);
 }
-
