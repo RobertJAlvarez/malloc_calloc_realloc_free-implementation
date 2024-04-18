@@ -1,6 +1,6 @@
 #include <stddef.h>
 #include <stdio.h>     //printf()
-#include <sys/mman.h>  //mmap(void *addr, size_t len, int prot, int flags, int fd, off_t offset)  munmap(void *addr, size_t len)
+#include <sys/mman.h>  //mmap(), munmap()
 #include <unistd.h>    //getpagesize(void)
 
 #include "alloc.h"
@@ -12,64 +12,21 @@ void print_LL_info(void);
 
 typedef struct s_Block {
   size_t bytes_used;
-  Block *next_block;
+  struct s_Block *next_block;
 } Block;
 
 typedef struct s_Map {
   Block *first_block;
   Block *largest_block;
-  Map *next_map;
+  struct s_Map *next_map;
 } Map;
 
-typedef struct s_List {
+typedef struct {
   Map *first_map;
   Map *largest_map;
 } List;
 
 // END OF STRUCTs
-
-// BEGINNING OF HELPER FUNCTIONS DECLARATION
-
-/* Initialize the linked list to keep the history. */
-static int init_LL(void);
-
-/* Use mmap to get a page of memory, use the beginning for the Map object and
- * the rest for a block. This function set all the attributes of the Map, block
- * and add the map to the LL. BUT, the largest_map  pointer for LL are not
- * modified.
- */
-static Map *make_map(void);
-
-/* Given the map where the block belong to, we add it and marge the block with
- * any other if possible. */
-static int add_block_to_map(Map *map, Block *new_block);
-
-/* Iterate over all Maps in LL and we update its largest_map pointer */
-static void update_largest_map(void);
-
-/* Given a block pointer we add it to the respective map using
- * add_block_to_map(), if the map got everything back we munmap it and remove it
- * from LL.
- */
-static void add_block(Block *block);
-
-/* We iterate over all the blocks on the map to update the largest_block pointer
- */
-static void update_largest_block(Map *map);
-
-/* We get size bytes from a block in any map, we first look into the largest_map
- * in LL, if we don't have enough, we update it by calling update_largest_map()
- * and check with that one. If the new largest map have enough, we use its
- * block, otherwise we call make_map(), get size from it and update LL if the
- * remaining is more than the largest_map().
- */
-static void *get_allocation(size_t size);
-
-/* Check if n1 * n2 can be hold in a size_t type. If so, return 1 and store the
- * value in c. Otherwise, return 0 */
-static int __try_size_t_multiply(size_t *c, size_t n1, size_t n2);
-
-// END OF HELPER FUNCTIONS DECLARATION
 
 // BEGINNING OF GLOBAL VARIABLES DECLARATION
 
@@ -79,34 +36,18 @@ static List LL = {NULL, NULL};  // Start a list to save all the allocation
 
 // END OF GLOBAL VARIABLES DECLARATION
 
-static int init_LL() {
-  // define the size of a page if it isn't already
-  if (PAGE == 0) {
-    PAGE = (size_t)getpagesize();
-  }
-
-  // This function is never called, unless user is requesting n_bytes that is
-  // less than a PAGE+sizeof(Map)
-  make_map();
-
-  // LL.first_map would now be pointing to something that it is not null if
-  // make_map was successful
-  if (LL.first_map == NULL) {
-    return -1;
-  }
-
-  return 0;
-}
-
-static Map *make_map() {
+/* Use mmap to get a page of memory, use the beginning for the Map object and
+ * the rest for a block. This function set all the attributes of the Map, block
+ * and add the map to the LL. BUT, the largest_map  pointer for LL are not
+ * modified.
+ */
+static Map *__make_map(void) {
   // Allocate a page of memory for a Map and the rest to Block
   void *ptr = mmap(NULL, PAGE, PROT_WRITE | PROT_READ,
                    MAP_SHARED | MAP_ANONYMOUS, -1, 0);
 
   // Make sure that mmap was successful
-  if (ptr == MAP_FAILED) {
-    return NULL;
-  }
+  if (ptr == MAP_FAILED) return NULL;
 
   Map *map = (Map *)ptr;
 
@@ -122,34 +63,36 @@ static Map *make_map() {
   block->bytes_used = PAGE - sizeof(Map);
   block->next_block = NULL;
 
-  /* Add map to the LL */
-
-  // If this map is the first successful one since the creation of the linked
-  // list
-  if (LL.first_map == NULL) {
-    LL.first_map = map;
-    LL.largest_map = map;
-  }
-  // If map is before the first_map base in memory address
-  else if (LL.first_map > map) {
-    map->next_map = LL.first_map;
-    LL.first_map = map;
-  } else {
-    Map *prev_map = LL.first_map;
-    // While we have more maps and the next map is before than the new map in
-    // memory
-    while ((prev_map->next_map != NULL) && (prev_map->next_map < map)) {
-      prev_map = prev_map->next_map;
-    }
-
-    map->next_map = prev_map->next_map;
-    prev_map->next_map = map;
-  }
-
   return map;
 }
 
-static int add_block_to_map(Map *map, Block *new_block) {
+/* Initialize the linked list to keep the history. */
+static int __init_LL(void) {
+  // define the size of a page if it isn't already
+  if (PAGE == 0) PAGE = (size_t)getpagesize();
+
+  // This function should had not being called because LL was already
+  // initialized
+  if (LL.first_map != NULL) return 0;
+
+  // This function is never called, unless user is requesting n_bytes that is
+  // less than a PAGE+sizeof(Map)
+  Map *map = __make_map();
+
+  // Add map to the LL
+  LL.first_map = map;
+  LL.largest_map = map;
+
+  // LL.first_map would now be pointing to something that it is not null if
+  // __make_map was successful
+  if (LL.first_map == NULL) return -1;
+
+  return 0;
+}
+
+/* Given the map where the block belong to, we add it and marge the block with
+ * any other if possible. */
+static int __add_block_to_map(Map *map, Block *new_block) {
   Block *curr_block = map->first_block;
 
   // If there are no blocks in the map
@@ -198,9 +141,8 @@ static int add_block_to_map(Map *map, Block *new_block) {
 
   // curr_block is >= than new_block, check that new_block is not inside
   // curr_block
-  if (((void *)new_block) < (((void *)curr_block) + curr_block->bytes_used)) {
+  if (((void *)new_block) < (((void *)curr_block) + curr_block->bytes_used))
     return -1;
-  }
 
   // Update the pointer so the blocks are organize
   new_block->next_block = block_after;
@@ -213,9 +155,9 @@ static int add_block_to_map(Map *map, Block *new_block) {
     new_block->bytes_used += block_after->bytes_used;
   }
   // Check is new_block have more space than largest block
-  if (new_block->bytes_used > map->largest_block->bytes_used) {
+  if (new_block->bytes_used > map->largest_block->bytes_used)
     map->largest_block = new_block;
-  }
+
   // Try to merge curr_block and new_block
   if (((void *)curr_block) + curr_block->bytes_used == ((void *)new_block)) {
     curr_block->next_block = new_block->next_block;
@@ -228,7 +170,8 @@ static int add_block_to_map(Map *map, Block *new_block) {
   return 0;
 }
 
-static void update_largest_map() {
+/* Iterate over all Maps in LL and we update its largest_map pointer */
+static void __update_largest_map(void) {
   Map *map = LL.first_map;
   Block *block;
   size_t largest_size = 0;
@@ -245,7 +188,11 @@ static void update_largest_map() {
   }
 }
 
-static void add_block(Block *block) {
+/* Given a block pointer we add it to the respective map using
+ * __add_block_to_map(), if the map got everything back we munmap it and remove
+ * it from LL.
+ */
+static void __add_block(Block *block) {
   // The next block pointer is not meaningful so we set it to null
   block->next_block = NULL;
 
@@ -260,9 +207,7 @@ static void add_block(Block *block) {
 
   // At this point we know that block is inside curr_map, so we need to added it
   // to its list of blocks
-  if (add_block_to_map(curr_map, block) < 0) {
-    return;
-  }
+  if (__add_block_to_map(curr_map, block) < 0) return;
 
   Block *temp_block = LL.largest_map->largest_block;
 
@@ -304,7 +249,7 @@ static void add_block(Block *block) {
     }
     // Update LL if the map we munmap was the largest map
     else if (curr_is_largest) {
-      update_largest_map();
+      __update_largest_map();
     }
   }
   // If by adding the new block we make the map to have a bigger block than what
@@ -315,7 +260,33 @@ static void add_block(Block *block) {
   }
 }
 
-static void update_largest_block(Map *map) {
+static int __add_map_to_LL(Map *map) {
+  if (LL.first_map == NULL) {
+    if (__init_LL() != 0) return 1;
+  }
+
+  // If map is before the first_map base in memory address
+  if (LL.first_map > map) {
+    map->next_map = LL.first_map;
+    LL.first_map = map;
+  } else {
+    Map *prev_map = LL.first_map;
+    // While we have more maps and the next map is before than the new map in
+    // memory
+    while ((prev_map->next_map != NULL) && (prev_map->next_map < map)) {
+      prev_map = prev_map->next_map;
+    }
+
+    map->next_map = prev_map->next_map;
+    prev_map->next_map = map;
+  }
+
+  return 0;
+}
+
+/* We iterate over all the blocks on the map to update the largest_block
+ * pointer. */
+static void __update_largest_block(Map *map) {
   map->largest_block = NULL;
   Block *block = map->first_block;
   size_t largest_size = 0;
@@ -329,15 +300,22 @@ static void update_largest_block(Map *map) {
   }
 }
 
-static void *get_allocation(size_t size) {
+/* We get size bytes from a block in any map, we first look into the largest_map
+ * in LL, if we don't have enough, we update it by calling
+ * __update_largest_map() and check with that one. If the new largest map have
+ * enough, we use its block, otherwise we call __make_map(), get size from it
+ * and update LL if the remaining is more than the largest_map().
+ */
+static void *__get_allocation(size_t size) {
   Map *map = LL.largest_map;
   Block *block = map->largest_block;
   Block *temp_block;
 
   if ((block == NULL) || (block->bytes_used < size)) {
-    // It could be that the LL is not updated because of a lot of get_allocation
-    // had happen and not enough free() had been done to keep it up to date
-    update_largest_map();
+    // It could be that the LL is not updated because of a lot of
+    // __get_allocation had happen and not enough free() had been done to keep
+    // it up to date
+    __update_largest_map();
 
     map = LL.largest_map;
     block = map->largest_block;
@@ -346,10 +324,10 @@ static void *get_allocation(size_t size) {
   // If the largest block doesn't exist is because all memory had been use so we
   // need to make more OR if the largest block don't have enough bytes
   if ((block == NULL) || (block->bytes_used < size)) {
-    map = make_map();
-    if (map == NULL) {
-      return NULL;
-    }
+    map = __make_map();
+    if (map == NULL) return NULL;
+    if (__add_map_to_LL(map) != 0) return NULL;
+
     // block is at the beginning of the available memory to be use
     temp_block = map->first_block;
     /* Last bytes of block ends at the end of the map bytes range */
@@ -381,7 +359,7 @@ static void *get_allocation(size_t size) {
       if (map->first_block == map->largest_block) {
         map->first_block = block->next_block;
         ;
-        update_largest_block(map);
+        __update_largest_block(map);
       } else {
         // We know that the largest_block is not the first block so we find the
         // block that is pointing to it
@@ -421,23 +399,19 @@ static void *get_allocation(size_t size) {
       temp_block->bytes_used = temp_block->bytes_used - size;
       block->bytes_used = size;
       // update largest_block
-      update_largest_block(map);
+      __update_largest_block(map);
     }
   }
 
   return ((void *)block) + sizeof(size_t);
 }
 
-/* If size is zero, return NULL. Otherwise, call get_allocation with size. */
+/* If size is zero, return NULL. Otherwise, call __get_allocation with size. */
 void *__malloc_impl(size_t req_size) {
-  if (req_size == ((size_t)0)) {
-    return NULL;
-  }
+  if (req_size == ((size_t)0)) return NULL;
 
   // define the size of a page
-  if (PAGE == 0) {
-    PAGE = (size_t)getpagesize();
-  }
+  if (PAGE == 0) PAGE = (size_t)getpagesize();
 
   size_t need_size;
 
@@ -480,12 +454,12 @@ void *__malloc_impl(size_t req_size) {
   }
 
   if (LL.first_map == NULL) {
-    if (init_LL() < 0) {
+    if (__init_LL() < 0) {
       return NULL;
     }
   }
 
-  return get_allocation(need_size);
+  return __get_allocation(need_size);
 }
 
 /* If size is less than what already assign to *ptr just lock what is after size
@@ -493,9 +467,7 @@ void *__malloc_impl(size_t req_size) {
 void *__realloc_impl(void *ptr, size_t req_size) {
   // If ptr is NULL, realloc() is identical to a call to malloc() for size
   // bytes.
-  if (ptr == NULL) {
-    return __malloc_impl(req_size);
-  }
+  if (ptr == NULL) return __malloc_impl(req_size);
 
   // If size is 0, we free the ptr and return NULL
   if (req_size == ((size_t)0)) {
@@ -516,7 +488,7 @@ void *__realloc_impl(void *ptr, size_t req_size) {
   }
 
   if (LL.first_map == NULL) {
-    if (init_LL() < 0) {
+    if (__init_LL() < 0) {
       return NULL;
     }
   }
@@ -553,7 +525,7 @@ void *__realloc_impl(void *ptr, size_t req_size) {
         *t = req_size;
         ptr = (void *)&t[1];
       } else {
-        ptr = get_allocation(need_size);
+        ptr = __get_allocation(need_size);
       }
       // We couldn't get enough space
       if (ptr == NULL) {
@@ -570,7 +542,7 @@ void *__realloc_impl(void *ptr, size_t req_size) {
       // Save what is left in temp and add it to the LL
       Block *temp_block = (Block *)(((void *)curr_block) + need_size);
       temp_block->bytes_used = curr_block->bytes_used - need_size;
-      add_block(temp_block);
+      __add_block(temp_block);
       // Update bytes_used space
       curr_block->bytes_used = need_size;
     }
@@ -594,7 +566,7 @@ void *__realloc_impl(void *ptr, size_t req_size) {
       *t = req_size;
       ptr = (void *)&t[1];
     } else {
-      ptr = get_allocation(need_size);
+      ptr = __get_allocation(need_size);
     }
     // We couldn't get enough space
     if (ptr == NULL) {
@@ -607,76 +579,20 @@ void *__realloc_impl(void *ptr, size_t req_size) {
     for (size_t i = ((size_t)sizeof(size_t)); i < curr_block->bytes_used; i++) {
       *t++ = *old_ptr++;
     }
-    // Free curr_block, either by munmap() or add_block()
+    // Free curr_block, either by munmap() or __add_block()
     if (curr_block->bytes_used >= PAGE) {
       munmap(curr_block, curr_block->bytes_used);
     } else {
-      add_block(curr_block);
+      __add_block(curr_block);
     }
   }
 
   return ptr;
 }
 
-/* Call malloc and iterate over the point to change everything to '0's. */
-void *__calloc_impl(size_t count, size_t size) {
-  size_t n_bytes;
-  if (__try_size_t_multiply(&n_bytes, count, size) == 0) {
-    return NULL;
-  }
-
-  // We either have count or size equal to 0
-  if (n_bytes == 0) {
-    return NULL;
-  }
-
-  void *ptr = __malloc_impl(n_bytes);
-
-  // No memory could be allocated
-  if (ptr == NULL) {
-    return NULL;
-  }
-
-  // Initialize all characters in calloc to '\0';
-  size_t *a = (size_t *)(((void *)ptr) - sizeof(size_t));
-  n_bytes = *a - sizeof(size_t);
-
-  unsigned char *t = ((unsigned char *)ptr);
-  const unsigned char c = ((const unsigned char)'\0');
-
-  while (n_bytes--) {
-    *t++ = c;
-  }
-
-  return ptr;
-}
-
-/* Add space back to List using add_block */
-void __free_impl(void *ptr) {
-  if (ptr == NULL) {
-    return;
-  }
-
-  // Adjust ptr by sizeof(size_t) to start where the number of bytes used are
-  // allocated for ptr
-  Block *temp = (Block *)(((void *)ptr) - sizeof(size_t));
-
-  // define the size of a page
-  if (PAGE == 0) {
-    PAGE = (size_t)getpagesize();
-  }
-
-  // If we allocate this map by itself, we unmap it right away because it
-  // doesn't belong to any Map
-  if (temp->bytes_used >= PAGE) {
-    munmap(temp, temp->bytes_used);
-    return;
-  }
-
-  add_block(
-      temp);  // Adjust ptr so size_t before to start on the size of pointer
-}
-
+/* Check if n1 * n2 can be hold in a size_t type. If so, return 1 and store the
+ * value in c. Otherwise, return 0.
+ */
 static int __try_size_t_multiply(size_t *ans, size_t n1, size_t n2) {
   size_t res, quot;  // res = residual, quot = quotient
 
@@ -702,7 +618,54 @@ static int __try_size_t_multiply(size_t *ans, size_t n1, size_t n2) {
   return 1;
 }
 
-void print_LL_info() {
+/* Call malloc and iterate over the point to change everything to '0's. */
+void *__calloc_impl(size_t count, size_t size) {
+  size_t n_bytes;
+  if (__try_size_t_multiply(&n_bytes, count, size) == 0) return NULL;
+
+  // We either have count or size equal to 0
+  if (n_bytes == 0) return NULL;
+
+  void *ptr = __malloc_impl(n_bytes);
+
+  // No memory could be allocated
+  if (ptr == NULL) return NULL;
+
+  // Initialize all characters in calloc to '\0';
+  size_t *a = (size_t *)(((void *)ptr) - sizeof(size_t));
+  n_bytes = *a - sizeof(size_t);
+
+  unsigned char *t = ((unsigned char *)ptr);
+  const unsigned char c = ((const unsigned char)'\0');
+
+  while (n_bytes--) *t++ = c;
+
+  return ptr;
+}
+
+/* Add space back to List using add_block */
+void __free_impl(void *ptr) {
+  if (ptr == NULL) return;
+
+  // Adjust ptr by sizeof(size_t) to start where the number of bytes used are
+  // allocated for ptr
+  Block *temp = (Block *)(((void *)ptr) - sizeof(size_t));
+
+  // define the size of a page
+  if (PAGE == 0) PAGE = (size_t)getpagesize();
+
+  // If we allocate this map by itself, we unmap it right away because it
+  // doesn't belong to any Map
+  if (temp->bytes_used >= PAGE) {
+    munmap(temp, temp->bytes_used);
+    return;
+  }
+
+  // Adjust ptr so size_t before to start on the size of pointer
+  __add_block(temp);
+}
+
+void print_LL_info(void) {
   printf("\nInside print_LL_info()\n");
   printf("LL.largest_map = %p\n", LL.largest_map);
 

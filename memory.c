@@ -143,7 +143,7 @@ void *malloc(size_t size) {
 
 void *calloc(size_t nmemb, size_t size) {
   //__memory_print_debug("calling calloc with 0x%zx items of size 0x%zx\n",
-  //nmemb, size);
+  // nmemb, size);
   void *ptr;
 
   pthread_mutex_lock(&memory_management_lock);
@@ -155,7 +155,7 @@ void *calloc(size_t nmemb, size_t size) {
 
 void *realloc(void *old_ptr, size_t size) {
   //__memory_print_debug("calling realloc with pointer %p and new size 0x%zx\n",
-  //old_ptr, size);
+  // old_ptr, size);
   void *ptr;
 
   pthread_mutex_lock(&memory_management_lock);
